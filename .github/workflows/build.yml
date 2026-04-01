@@ -91,6 +91,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" "$WATCH_APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" "$WATCH_APP/Info.plist" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 10.0" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$WATCH_APP/Info.plist"
           echo "Watch plist fixed:"
           /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$WATCH_APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$WATCH_APP/Info.plist"
