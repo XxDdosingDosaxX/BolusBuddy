@@ -1,0 +1,45 @@
+name: BolusBuddy
+options:
+  bundleIdPrefix: com.kothari
+  xcodeVersion: "15.4"
+  minimumXcodeGenVersion: "2.38.0"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: 6PG65NU8X5
+    CODE_SIGN_STYLE: Manual
+
+targets:
+  BolusBuddy:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - BolusBuddy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kothari.BolusBuddy
+        INFOPLIST_FILE: BolusBuddy/Info.plist
+        CODE_SIGN_IDENTITY: "Apple Distribution"
+        PROVISIONING_PROFILE_SPECIFIER: "BolusBuddy App Store"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: BolusBuddy Watch App
+
+  BolusBuddy Watch App:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - BolusBuddyWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kothari.BolusBuddy.watchkitapp
+        INFOPLIST_FILE: BolusBuddyWatch/Info.plist
+        CODE_SIGN_IDENTITY: "Apple Distribution"
+        PROVISIONING_PROFILE_SPECIFIER: "BolusBuddy Watch App Store"
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "4"
+    entitlements:
+      path: BolusBuddyWatch/BolusBuddyWatch.entitlements

@@ -1,0 +1,11 @@
+certs/
+*.xcodeproj
+*.xcworkspace
+build/
+DerivedData/
+node_modules/
+.DS_Store
+*.mobileprovision
+*.p12
+*.p8
+snapshot*.md
