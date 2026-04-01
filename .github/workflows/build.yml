@@ -24,6 +24,22 @@ jobs:
     - name: Generate Xcode project
       run: xcodegen generate
 
+    - name: Fix watchOS build settings
+      run: |
+        # Fix the watch target's build settings in the generated project
+        # Use PlistBuddy to ensure the watch Info.plist has correct values
+        /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" BolusBuddyWatch/Info.plist 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" BolusBuddyWatch/Info.plist
+        /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" BolusBuddyWatch/Info.plist
+        /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" BolusBuddyWatch/Info.plist 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Delete :MinimumOSVersion" BolusBuddyWatch/Info.plist 2>/dev/null || true
+
+        # Also patch the pbxproj to set correct TARGETED_DEVICE_FAMILY for watch target
+        sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2";/TARGETED_DEVICE_FAMILY = 4;/g' BolusBuddy.xcodeproj/project.pbxproj
+
+        # Set WATCHOS_DEPLOYMENT_TARGET in the project for the watch target
+        cat BolusBuddyWatch/Info.plist
+
     - name: Install certificate and provisioning profiles
       env:
         BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
