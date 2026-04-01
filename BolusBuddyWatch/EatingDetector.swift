@@ -12,7 +12,7 @@ class EatingDetector: NSObject, ObservableObject {
     static let shared = EatingDetector()
 
     private let motionManager = CMMotionManager()
-    private let healthStore = HKHealthStore()
+    // HealthKit could be added later to check for recent bolus deliveries
 
     // Detection state
     @Published var isMonitoring = false
