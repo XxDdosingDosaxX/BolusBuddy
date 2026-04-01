@@ -45,6 +45,9 @@ class EatingDetector: NSObject, ObservableObject {
     private var session: WKExtendedRuntimeSession?
     #endif
 
+    // Retain the activity manager so the permission dialog actually appears
+    private var activityManager: CMMotionActivityManager?
+
     // MARK: - Public API
 
     func startMonitoring() {
@@ -57,18 +60,21 @@ class EatingDetector: NSObject, ObservableObject {
 
         // Trigger the motion permission prompt by querying CMMotionActivityManager.
         // CMMotionManager alone does NOT trigger the system permission dialog.
-        let activityManager = CMMotionActivityManager()
-        activityManager.queryActivityStarting(from: Date(), to: Date(), to: .main) { [weak self] _, _ in
+        // Must retain activityManager as a property or the callback never fires.
+        activityManager = CMMotionActivityManager()
+        let now = Date()
+        let oneHourAgo = now.addingTimeInterval(-3600)
+        activityManager?.queryActivityStarting(from: oneHourAgo, to: now, to: .main) { [weak self] _, _ in
             // Permission dialog has been shown (or was already granted).
-            // Now start the actual motion monitoring.
             self?.beginMotionUpdates()
         }
     }
 
     private func beginMotionUpdates() {
         // Check authorization after the prompt
-        guard CMMotionActivityManager.authorizationStatus() == .authorized else {
-            print("BolusBuddy: Motion permission denied")
+        let status = CMMotionActivityManager.authorizationStatus()
+        guard status == .authorized || status == .notDetermined else {
+            print("BolusBuddy: Motion permission denied (status: \(status.rawValue))")
             return
         }
 

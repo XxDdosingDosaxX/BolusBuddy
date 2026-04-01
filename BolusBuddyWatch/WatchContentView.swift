@@ -82,6 +82,11 @@ struct WatchContentView: View {
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
                 }
+
+                // Version
+                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 4)
         }
