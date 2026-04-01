@@ -7,12 +7,13 @@ import WatchKit
 
 /// Detects eating gestures using Apple Watch accelerometer and gyroscope.
 /// Eating involves repeated arm-raise-to-mouth cycles with wrist rotation.
+/// Also uses location to detect food establishments (5 min dwell = reminder).
 /// When eating is detected for ~2 minutes without a recent bolus, sends an alert.
 class EatingDetector: NSObject, ObservableObject {
     static let shared = EatingDetector()
 
     private let motionManager = CMMotionManager()
-    // HealthKit could be added later to check for recent bolus deliveries
+    let locationDetector = LocationDetector()
 
     // Detection state
     @Published var isMonitoring = false
@@ -20,6 +21,7 @@ class EatingDetector: NSObject, ObservableObject {
     @Published var biteCount = 0
     @Published var lastAlertTime: Date?
     @Published var sensitivity: Double = 1.0 // 0.5 = less sensitive, 1.5 = more sensitive
+    @Published var locationTriggered = false  // True when location triggered the alert
 
     // Bite detection
     private var biteEvents: [Date] = []
@@ -58,6 +60,12 @@ class EatingDetector: NSObject, ObservableObject {
 
         requestNotificationPermission()
 
+        // Start location-based detection
+        locationDetector.onFoodPlaceDwellDetected = { [weak self] placeName in
+            self?.handleFoodPlaceDwell(placeName: placeName)
+        }
+        locationDetector.startMonitoring()
+
         // Trigger the motion permission prompt by querying CMMotionActivityManager.
         // CMMotionManager alone does NOT trigger the system permission dialog.
         // Must retain activityManager as a property or the callback never fires.
@@ -94,12 +102,14 @@ class EatingDetector: NSObject, ObservableObject {
 
     func stopMonitoring() {
         motionManager.stopDeviceMotionUpdates()
+        locationDetector.stopMonitoring()
         #if os(watchOS)
         session?.invalidate()
         session = nil
         #endif
         isMonitoring = false
         isEatingDetected = false
+        locationTriggered = false
         biteEvents.removeAll()
         biteCount = 0
         print("BolusBuddy: Eating detection stopped")
@@ -107,13 +117,45 @@ class EatingDetector: NSObject, ObservableObject {
 
     func resetAlert() {
         isEatingDetected = false
+        locationTriggered = false
         biteEvents.removeAll()
         biteCount = 0
+    }
+
+    // MARK: - Location-Based Detection
+
+    private func handleFoodPlaceDwell(placeName: String) {
+        // Check cooldown — don't alert if we recently alerted
+        if let lastAlert = lastAlertTime,
+           Date().timeIntervalSince(lastAlert) < alertCooldownMinutes * 60 {
+            return
+        }
+
+        DispatchQueue.main.async {
+            self.isEatingDetected = true
+            self.locationTriggered = true
+            self.lastAlertTime = Date()
+        }
+
+        // Stop motion updates for this meal — location already triggered
+        motionManager.stopDeviceMotionUpdates()
+
+        sendBolusReminder(locationName: placeName)
+
+        // Resume motion detection after cooldown
+        DispatchQueue.main.asyncAfter(deadline: .now() + alertCooldownMinutes * 60) { [weak self] in
+            guard let self = self, self.isMonitoring else { return }
+            self.locationTriggered = false
+            self.beginMotionUpdates()
+        }
     }
 
     // MARK: - Motion Processing
 
     private func processMotion(_ motion: CMDeviceMotion) {
+        // Skip motion detection if location already triggered for this meal
+        if locationTriggered { return }
+
         let pitch = motion.attitude.pitch
         let roll = motion.attitude.roll
 
@@ -170,7 +212,7 @@ class EatingDetector: NSObject, ObservableObject {
                 self.isEatingDetected = true
                 self.lastAlertTime = Date()
             }
-            sendBolusReminder()
+            sendBolusReminder(locationName: nil)
         }
     }
 
@@ -184,7 +226,7 @@ class EatingDetector: NSObject, ObservableObject {
         }
     }
 
-    private func sendBolusReminder() {
+    private func sendBolusReminder(locationName: String?) {
         #if os(watchOS)
         // Haptic alert on watch
         WKInterfaceDevice.current().play(.notification)
@@ -197,8 +239,13 @@ class EatingDetector: NSObject, ObservableObject {
 
         // Local notification (appears on watch + mirrors to phone)
         let content = UNMutableNotificationContent()
-        content.title = "Did you bolus?"
-        content.body = "Eating detected! Don't forget to bolus for your meal."
+        if let name = locationName {
+            content.title = "At \(name) — bolus?"
+            content.body = "You've been at \(name) for 5 minutes. Don't forget to bolus!"
+        } else {
+            content.title = "Did you bolus?"
+            content.body = "Eating detected! Don't forget to bolus for your meal."
+        }
         content.sound = .default
         content.categoryIdentifier = "BOLUS_REMINDER"
         content.interruptionLevel = .timeSensitive

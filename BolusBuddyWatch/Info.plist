@@ -19,13 +19,15 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>5</string>
     <key>WKApplication</key>
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
     <string>com.kothari.BolusBuddy</string>
     <key>NSMotionUsageDescription</key>
     <string>BolusBuddy uses motion sensors to detect eating gestures and remind you to bolus.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>BolusBuddy uses your location to detect when you're at a restaurant and remind you to bolus.</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>UIDeviceFamily</key>

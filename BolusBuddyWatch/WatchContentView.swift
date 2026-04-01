@@ -27,15 +27,35 @@ struct WatchContentView: View {
                     .foregroundStyle(statusColor)
                     .multilineTextAlignment(.center)
 
-                // Bite counter
+                // Bite counter + location status
                 if detector.isMonitoring {
-                    HStack(spacing: 4) {
-                        Image(systemName: "hand.raised")
-                            .font(.system(size: 10))
-                        Text("Bites: \(detector.biteCount)")
-                            .font(.system(size: 11, design: .monospaced))
+                    if detector.locationTriggered, let place = detector.locationDetector.currentPlaceName {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.system(size: 10))
+                            Text(place)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.orange)
+                    } else if detector.locationDetector.isAtFoodPlace, let place = detector.locationDetector.currentPlaceName {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mappin")
+                                .font(.system(size: 10))
+                            Text(place)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(.yellow)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "hand.raised")
+                                .font(.system(size: 10))
+                            Text("Bites: \(detector.biteCount)")
+                                .font(.system(size: 11, design: .monospaced))
+                        }
+                        .foregroundStyle(.secondary)
                     }
-                    .foregroundStyle(.secondary)
                 }
 
                 // Toggle button
@@ -76,6 +96,10 @@ struct WatchContentView: View {
                         }
                     }
 
+                // Location detection toggle
+                Toggle("Location alerts", isOn: $detector.locationDetector.isEnabled)
+                    .font(.system(size: 11))
+
                 // Last alert time
                 if let lastAlert = detector.lastAlertTime {
                     Text("Last alert: \(lastAlert.formatted(.dateTime.hour().minute()))")
@@ -99,6 +123,9 @@ struct WatchContentView: View {
 
     private var statusText: String {
         if !detector.isMonitoring { return "Not Monitoring" }
+        if detector.isEatingDetected && detector.locationTriggered {
+            return "At a restaurant!\nDid you bolus?"
+        }
         if detector.isEatingDetected { return "Eating Detected!\nDid you bolus?" }
         return "Monitoring..."
     }
