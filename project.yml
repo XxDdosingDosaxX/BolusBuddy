@@ -51,5 +51,11 @@ targets:
         SDKROOT: watchos
         SUPPORTS_MACCATALYST: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    postBuildScripts:
+      - name: Fix Watch Plist
+        script: |
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFiles" "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles array" "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles:0 string AppIcon" "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Info.plist"
     entitlements:
       path: BolusBuddyWatch/BolusBuddyWatch.entitlements
