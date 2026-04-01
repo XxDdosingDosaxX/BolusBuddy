@@ -43,5 +43,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "4"
         ARCHS[sdk=watchos*]: "arm64_32 arm64"
         ARCHS[sdk=watchsimulator*]: "arm64"
+        WATCHOS_DEPLOYMENT_TARGET: "10.0"
+        SDKROOT: watchos
+        SUPPORTS_MACCATALYST: "NO"
     entitlements:
       path: BolusBuddyWatch/BolusBuddyWatch.entitlements

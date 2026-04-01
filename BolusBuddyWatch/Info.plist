@@ -28,5 +28,11 @@
     <string>BolusBuddy uses motion sensors to detect eating gestures and remind you to bolus.</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>4</integer>
+    </array>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
 </dict>
 </plist>
