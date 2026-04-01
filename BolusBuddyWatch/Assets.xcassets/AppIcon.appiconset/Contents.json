@@ -1,14 +1,22 @@
 {
-  "images": [
+  "images" : [
     {
-      "filename": "icon_1024x1024.png",
-      "idiom": "universal",
-      "platform": "watchOS",
-      "size": "1024x1024"
+      "filename" : "icon_1024x1024.png",
+      "idiom" : "watch",
+      "role" : "appLauncher",
+      "scale" : "2x",
+      "size" : "1024x1024",
+      "subtype" : "38mm"
+    },
+    {
+      "filename" : "icon_1024x1024.png",
+      "idiom" : "watch-marketing",
+      "scale" : "1x",
+      "size" : "1024x1024"
     }
   ],
-  "info": {
-    "author": "xcode",
-    "version": 1
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
   }
 }
