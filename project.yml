@@ -32,7 +32,11 @@ targets:
     platform: watchOS
     deploymentTarget: "10.0"
     sources:
-      - BolusBuddyWatch
+      - path: BolusBuddyWatch
+        excludes:
+          - "Assets.xcassets"
+      - path: BolusBuddyWatch/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.kothari.BolusBuddy.watchkitapp
