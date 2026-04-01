@@ -74,12 +74,29 @@ jobs:
         xcodebuild -project BolusBuddy.xcodeproj \
           -scheme BolusBuddy \
           -archivePath $RUNNER_TEMP/BolusBuddy.xcarchive \
-          -sdk iphoneos \
           -configuration Release \
-          -destination generic/platform=iOS \
+          -destination "generic/platform=iOS" \
           clean archive \
           CODE_SIGN_STYLE=Manual \
-          DEVELOPMENT_TEAM="${{ secrets.TEAM_ID }}"
+          DEVELOPMENT_TEAM="${{ secrets.TEAM_ID }}" \
+          ONLY_ACTIVE_ARCH=NO
+
+    - name: Fix watch plist in archive
+      run: |
+        WATCH_APP=$(find $RUNNER_TEMP/BolusBuddy.xcarchive -name "BolusBuddy Watch App.app" -type d | head -1)
+        if [ -n "$WATCH_APP" ]; then
+          echo "Found watch app at: $WATCH_APP"
+          /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 10.0" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          echo "Watch plist fixed:"
+          /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$WATCH_APP/Info.plist"
+        else
+          echo "WARNING: Watch app not found in archive"
+        fi
 
     - name: Export IPA
       run: |
