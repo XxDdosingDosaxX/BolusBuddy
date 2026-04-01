@@ -54,6 +54,24 @@ class EatingDetector: NSObject, ObservableObject {
         }
 
         requestNotificationPermission()
+
+        // Trigger the motion permission prompt by querying CMMotionActivityManager.
+        // CMMotionManager alone does NOT trigger the system permission dialog.
+        let activityManager = CMMotionActivityManager()
+        activityManager.queryActivityStarting(from: Date(), to: Date(), to: .main) { [weak self] _, _ in
+            // Permission dialog has been shown (or was already granted).
+            // Now start the actual motion monitoring.
+            self?.beginMotionUpdates()
+        }
+    }
+
+    private func beginMotionUpdates() {
+        // Check authorization after the prompt
+        guard CMMotionActivityManager.authorizationStatus() == .authorized else {
+            print("BolusBuddy: Motion permission denied")
+            return
+        }
+
         #if os(watchOS)
         startExtendedSession()
         #endif
