@@ -133,6 +133,31 @@ jobs:
           -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
           -exportPath $RUNNER_TEMP/export
 
+    - name: Fix watch app in IPA
+      run: |
+        cd $RUNNER_TEMP/export
+        mkdir -p ipa_fix
+        cd ipa_fix
+        unzip -o ../BolusBuddy.ipa
+        WATCH_APP=$(find . -name "BolusBuddy Watch App.app" -type d | head -1)
+        if [ -n "$WATCH_APP" ]; then
+          echo "Fixing watch app in IPA: $WATCH_APP"
+          /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 10.0" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$WATCH_APP/Info.plist"
+          echo "Watch plist after fix:"
+          /usr/libexec/PlistBuddy -c "Print" "$WATCH_APP/Info.plist" | head -30
+        fi
+        # Repackage IPA
+        rm ../BolusBuddy.ipa
+        zip -r ../BolusBuddy.ipa Payload/
+        cd ..
+        rm -rf ipa_fix
+
     - name: Upload to TestFlight
       env:
         APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
