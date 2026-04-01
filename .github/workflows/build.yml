@@ -93,6 +93,9 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 10.0" "$WATCH_APP/Info.plist" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$WATCH_APP/Info.plist" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFiles" "$WATCH_APP/Info.plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles array" "$WATCH_APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles:0 string AppIcon" "$WATCH_APP/Info.plist"
           # Debug: show what's in the watch app bundle
           echo "Watch app contents:"
           ls -la "$WATCH_APP/" | head -20
