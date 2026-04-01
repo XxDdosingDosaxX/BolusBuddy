@@ -41,5 +41,7 @@ targets:
         PROVISIONING_PROFILE_SPECIFIER: "BolusBuddy Watch App Store"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "4"
+        ARCHS: "arm64 arm64_32"
+        VALID_ARCHS: "arm64 arm64_32"
     entitlements:
       path: BolusBuddyWatch/BolusBuddyWatch.entitlements
