@@ -1,8 +1,9 @@
 import Foundation
 import CoreMotion
-import HealthKit
 import UserNotifications
+#if os(watchOS)
 import WatchKit
+#endif
 
 /// Detects eating gestures using Apple Watch accelerometer and gyroscope.
 /// Eating involves repeated arm-raise-to-mouth cycles with wrist rotation.
@@ -40,7 +41,9 @@ class EatingDetector: NSObject, ObservableObject {
     private let smoothingWindow = 10 // samples
 
     // Extended runtime for background
+    #if os(watchOS)
     private var session: WKExtendedRuntimeSession?
+    #endif
 
     // MARK: - Public API
 
@@ -51,7 +54,9 @@ class EatingDetector: NSObject, ObservableObject {
         }
 
         requestNotificationPermission()
+        #if os(watchOS)
         startExtendedSession()
+        #endif
 
         motionManager.deviceMotionUpdateInterval = 1.0 / 25.0 // 25Hz (battery-efficient)
         motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
@@ -65,8 +70,10 @@ class EatingDetector: NSObject, ObservableObject {
 
     func stopMonitoring() {
         motionManager.stopDeviceMotionUpdates()
+        #if os(watchOS)
         session?.invalidate()
         session = nil
+        #endif
         isMonitoring = false
         isEatingDetected = false
         biteEvents.removeAll()
@@ -154,6 +161,7 @@ class EatingDetector: NSObject, ObservableObject {
     }
 
     private func sendBolusReminder() {
+        #if os(watchOS)
         // Haptic alert on watch
         WKInterfaceDevice.current().play(.notification)
 
@@ -161,6 +169,7 @@ class EatingDetector: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             WKInterfaceDevice.current().play(.retry)
         }
+        #endif
 
         // Local notification (appears on watch + mirrors to phone)
         let content = UNMutableNotificationContent()
@@ -201,6 +210,7 @@ class EatingDetector: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(followUpRequest)
     }
 
+    #if os(watchOS)
     // MARK: - Extended Runtime Session (keeps app running in background)
 
     private func startExtendedSession() {
@@ -209,8 +219,10 @@ class EatingDetector: NSObject, ObservableObject {
         session?.delegate = self
         session?.start()
     }
+    #endif
 }
 
+#if os(watchOS)
 // MARK: - Extended Runtime Session Delegate
 extension EatingDetector: WKExtendedRuntimeSessionDelegate {
     func extendedRuntimeSessionDidStart(_ session: WKExtendedRuntimeSession) {
@@ -219,13 +231,11 @@ extension EatingDetector: WKExtendedRuntimeSessionDelegate {
 
     func extendedRuntimeSessionWillExpire(_ session: WKExtendedRuntimeSession) {
         print("BolusBuddy: Extended session expiring, restarting...")
-        // Restart the session to keep monitoring
         startExtendedSession()
     }
 
     func extendedRuntimeSession(_ session: WKExtendedRuntimeSession, didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason, error: (any Error)?) {
         print("BolusBuddy: Extended session invalidated: \(reason.rawValue)")
-        // Auto-restart if still monitoring
         if isMonitoring {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
                 self?.startExtendedSession()
@@ -233,3 +243,4 @@ extension EatingDetector: WKExtendedRuntimeSessionDelegate {
         }
     }
 }
+#endif
