@@ -46,5 +46,6 @@ targets:
         WATCHOS_DEPLOYMENT_TARGET: "10.0"
         SDKROOT: watchos
         SUPPORTS_MACCATALYST: "NO"
+        GENERATE_INFOPLIST_FILE: "NO"
     entitlements:
       path: BolusBuddyWatch/BolusBuddyWatch.entitlements
