@@ -26,18 +26,19 @@ jobs:
 
     - name: Fix watchOS build settings
       run: |
-        # Fix the watch target's build settings in the generated project
-        # Use PlistBuddy to ensure the watch Info.plist has correct values
+        # Patch pbxproj: fix TARGETED_DEVICE_FAMILY for watch target
+        sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2";/TARGETED_DEVICE_FAMILY = 4;/g' BolusBuddy.xcodeproj/project.pbxproj
+
+        # Ensure Info.plist has CFBundleIconFiles for watchOS validation
         /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" BolusBuddyWatch/Info.plist 2>/dev/null || true
         /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" BolusBuddyWatch/Info.plist
         /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" BolusBuddyWatch/Info.plist
         /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" BolusBuddyWatch/Info.plist 2>/dev/null || true
-        /usr/libexec/PlistBuddy -c "Delete :MinimumOSVersion" BolusBuddyWatch/Info.plist 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFiles" BolusBuddyWatch/Info.plist 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles array" BolusBuddyWatch/Info.plist
+        /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles:0 string AppIcon" BolusBuddyWatch/Info.plist
 
-        # Also patch the pbxproj to set correct TARGETED_DEVICE_FAMILY for watch target
-        sed -i '' 's/TARGETED_DEVICE_FAMILY = "1,2";/TARGETED_DEVICE_FAMILY = 4;/g' BolusBuddy.xcodeproj/project.pbxproj
-
-        # Set WATCHOS_DEPLOYMENT_TARGET in the project for the watch target
+        echo "Watch Info.plist:"
         cat BolusBuddyWatch/Info.plist
 
     - name: Install certificate and provisioning profiles
@@ -81,37 +82,6 @@ jobs:
           DEVELOPMENT_TEAM="${{ secrets.TEAM_ID }}" \
           ONLY_ACTIVE_ARCH=NO
 
-    - name: Fix watch plist in archive
-      run: |
-        WATCH_APP=$(find $RUNNER_TEMP/BolusBuddy.xcarchive -name "BolusBuddy Watch App.app" -type d | head -1)
-        if [ -n "$WATCH_APP" ]; then
-          echo "Found watch app at: $WATCH_APP"
-          /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 10.0" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFiles" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles array" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles:0 string AppIcon" "$WATCH_APP/Info.plist"
-          # Debug: show what's in the watch app bundle
-          echo "Watch app contents:"
-          ls -la "$WATCH_APP/" | head -20
-          echo "Assets.car exists:"
-          ls -la "$WATCH_APP/Assets.car" 2>/dev/null || echo "NO Assets.car found!"
-          echo "Watch plist fixed:"
-          /usr/libexec/PlistBuddy -c "Print :UIDeviceFamily" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$WATCH_APP/Info.plist"
-          # Re-codesign the watch app after plist modification
-          SIGNING_IDENTITY=$(security find-identity -v -p codesigning $RUNNER_TEMP/app-signing.keychain-db | grep "Apple Distribution" | head -1 | awk -F'"' '{print $2}')
-          echo "Re-signing with: $SIGNING_IDENTITY"
-          codesign --force --sign "$SIGNING_IDENTITY" --preserve-metadata=identifier,entitlements,flags "$WATCH_APP"
-        else
-          echo "WARNING: Watch app not found in archive"
-        fi
-
     - name: Export IPA
       run: |
         cat > $RUNNER_TEMP/ExportOptions.plist << EOF
@@ -144,46 +114,6 @@ jobs:
           -archivePath $RUNNER_TEMP/BolusBuddy.xcarchive \
           -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
           -exportPath $RUNNER_TEMP/export
-
-    - name: Fix and re-sign IPA
-      run: |
-        cd $RUNNER_TEMP/export
-        mkdir -p ipa_fix && cd ipa_fix
-        unzip -o ../BolusBuddy.ipa
-
-        WATCH_APP=$(find . -name "BolusBuddy Watch App.app" -type d | head -1)
-        if [ -n "$WATCH_APP" ]; then
-          echo "Patching watch app in IPA: $WATCH_APP"
-          /usr/libexec/PlistBuddy -c "Delete :UIDeviceFamily" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily array" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :UIDeviceFamily:0 integer 4" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Delete :UIRequiredDeviceCapabilities" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 10.0" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconFiles" "$WATCH_APP/Info.plist" 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles array" "$WATCH_APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIconFiles:0 string AppIcon" "$WATCH_APP/Info.plist"
-
-          # Get signing identity
-          SIGNING_IDENTITY=$(security find-identity -v -p codesigning $RUNNER_TEMP/app-signing.keychain-db | grep "Apple Distribution" | head -1 | awk -F'"' '{print $2}')
-          echo "Re-signing with: $SIGNING_IDENTITY"
-
-          # Re-sign watch app
-          codesign --force --sign "$SIGNING_IDENTITY" "$WATCH_APP"
-
-          # Re-sign main app (since embedded content changed)
-          IOS_APP=$(find . -maxdepth 2 -name "BolusBuddy.app" -type d | head -1)
-          if [ -n "$IOS_APP" ]; then
-            codesign --force --sign "$SIGNING_IDENTITY" "$IOS_APP"
-          fi
-        fi
-
-        # Repackage IPA
-        rm ../BolusBuddy.ipa
-        zip -r ../BolusBuddy.ipa Payload/
-        cd .. && rm -rf ipa_fix
-        echo "IPA repackaged"
 
     - name: Upload to TestFlight
       env:
