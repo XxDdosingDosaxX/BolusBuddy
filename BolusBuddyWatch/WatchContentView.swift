@@ -133,33 +133,47 @@ struct WatchContentView: View {
                             .font(.system(size: 8, weight: .bold, design: .monospaced))
                             .foregroundStyle(.cyan)
 
+                        // Arm elevation (gravity.y)
                         HStack {
-                            Text("Pitch:")
-                                .frame(width: 45, alignment: .leading)
-                            ProgressView(value: min(abs(detector.debugPitch), 1.0))
-                                .tint(abs(detector.debugPitch) > (0.25 / detector.sensitivity) ? .green : .gray)
-                            Text(String(format: "%.2f", detector.debugPitch))
+                            Text("Elev:")
+                                .frame(width: 40, alignment: .leading)
+                            ProgressView(value: min(max(detector.debugGravityY + 0.5, 0), 1.5) / 1.5)
+                                .tint(detector.debugGravityY > (0.25 / detector.sensitivity) ? .green : .gray)
+                            Text(String(format: "%.2f", detector.debugGravityY))
                         }
                         .font(.system(size: 9, design: .monospaced))
 
+                        // Wrist rotation (rotationRate.x)
                         HStack {
-                            Text("Roll:")
-                                .frame(width: 45, alignment: .leading)
-                            ProgressView(value: min(abs(detector.debugRoll), 1.0))
+                            Text("Wrist:")
+                                .frame(width: 40, alignment: .leading)
+                            ProgressView(value: min(detector.debugRotationRate / 3.0, 1.0))
+                                .tint(detector.debugRotationRate > (0.5 / detector.sensitivity) ? .green : .gray)
+                            Text(String(format: "%.1f", detector.debugRotationRate))
+                        }
+                        .font(.system(size: 9, design: .monospaced))
+
+                        // Acceleration magnitude
+                        HStack {
+                            Text("Accel:")
+                                .frame(width: 40, alignment: .leading)
+                            ProgressView(value: min(detector.debugAccelMag / 2.0, 1.0))
                                 .tint(.blue)
-                            Text(String(format: "%.2f", detector.debugRoll))
+                            Text(String(format: "%.2f", detector.debugAccelMag))
                         }
                         .font(.system(size: 9, design: .monospaced))
 
+                        // Repetition score (autocorrelation)
                         HStack {
-                            Text("RollΔ:")
-                                .frame(width: 45, alignment: .leading)
-                            ProgressView(value: min(detector.debugRollRange, 1.0))
-                                .tint(detector.debugRollRange > (0.15 / detector.sensitivity) ? .green : .gray)
-                            Text(String(format: "%.2f", detector.debugRollRange))
+                            Text("Reptn:")
+                                .frame(width: 40, alignment: .leading)
+                            ProgressView(value: min(detector.debugRepetition, 1.0))
+                                .tint(detector.debugRepetition > 0.3 ? .orange : .gray)
+                            Text(String(format: "%.2f", detector.debugRepetition))
                         }
                         .font(.system(size: 9, design: .monospaced))
 
+                        // State row
                         HStack(spacing: 4) {
                             Circle()
                                 .fill(detector.debugArmRaised ? Color.green : Color.gray)
@@ -167,6 +181,11 @@ struct WatchContentView: View {
                             Text(detector.debugArmRaised ? "ARM UP" : "arm down")
                                 .font(.system(size: 9, design: .monospaced))
                             Spacer()
+                            if !detector.debugIsStationary {
+                                Text("MOVING")
+                                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(.red)
+                            }
                             Text("Bites: \(detector.biteCount)")
                                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                                 .foregroundStyle(.orange)
@@ -205,7 +224,7 @@ struct WatchContentView: View {
                         Text("Location: When In Use only")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(.yellow)
-                        Text("Go to Settings → Privacy → Location → BolusBuddy → Always")
+                        Text("Go to Settings > Privacy > Location > BolusBuddy > Always")
                             .font(.system(size: 8))
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -316,15 +335,15 @@ struct MealDetailView: View {
                     }
                     HStack {
                         StatBox(label: "Bites", value: "\(meal.bitesCounted)")
-                        StatBox(label: "Max Pitch", value: String(format: "%.2f", meal.maxPitch))
+                        StatBox(label: "Max Elev", value: String(format: "%.2f", meal.maxGravityY))
                     }
                     HStack {
-                        StatBox(label: "Avg Pitch", value: String(format: "%.2f", meal.avgPitch))
-                        StatBox(label: "Avg RollΔ", value: String(format: "%.2f", meal.avgRollRange))
+                        StatBox(label: "Avg Elev", value: String(format: "%.2f", meal.avgGravityY))
+                        StatBox(label: "Avg Wrist", value: String(format: "%.1f", meal.avgRotationRate))
                     }
                     HStack {
-                        StatBox(label: "Max RollΔ", value: String(format: "%.2f", meal.maxRollRange))
-                        Spacer()
+                        StatBox(label: "Max Wrist", value: String(format: "%.1f", meal.maxRotationRate))
+                        StatBox(label: "Avg Reptn", value: String(format: "%.2f", meal.avgRepetition))
                     }
                 }
                 .padding(6)
@@ -337,27 +356,38 @@ struct MealDetailView: View {
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .foregroundStyle(.orange)
 
-                    let pitchAbove = meal.entries.filter { $0.pitch > 0.25 }.count
-                    let rollAbove = meal.entries.filter { $0.rollRange > 0.15 }.count
-                    let pitchPct = meal.entries.isEmpty ? 0 : Int(Double(pitchAbove) / Double(meal.entries.count) * 100)
-                    let rollPct = meal.entries.isEmpty ? 0 : Int(Double(rollAbove) / Double(meal.entries.count) * 100)
+                    let elevAbove = meal.entries.filter { $0.gravityY > 0.25 }.count
+                    let rotAbove = meal.entries.filter { $0.rotationRate > 0.5 }.count
+                    let repAbove = meal.entries.filter { $0.repetitionScore > 0.3 }.count
+                    let total = meal.entries.count
+                    let elevPct = total == 0 ? 0 : Int(Double(elevAbove) / Double(total) * 100)
+                    let rotPct = total == 0 ? 0 : Int(Double(rotAbove) / Double(total) * 100)
+                    let repPct = total == 0 ? 0 : Int(Double(repAbove) / Double(total) * 100)
 
-                    Text("Pitch > 0.25: \(pitchPct)% of time")
+                    Text("Elev > 0.25: \(elevPct)%")
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(pitchPct > 20 ? .green : .red)
-                    Text("RollΔ > 0.15: \(rollPct)% of time")
+                        .foregroundStyle(elevPct > 15 ? .green : .red)
+                    Text("Wrist > 0.5: \(rotPct)%")
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(rollPct > 20 ? .green : .red)
+                        .foregroundStyle(rotPct > 15 ? .green : .red)
+                    Text("Reptn > 0.3: \(repPct)%")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(repPct > 30 ? .green : .red)
 
-                    if pitchPct < 10 {
-                        Text("⚠ Pitch rarely crossed threshold — need lower pitch threshold")
+                    if elevPct < 10 {
+                        Text("Arm rarely reached threshold")
                             .font(.system(size: 8))
                             .foregroundStyle(.yellow)
                     }
-                    if rollPct < 10 {
-                        Text("⚠ Roll rarely crossed threshold — need lower roll threshold")
+                    if rotPct < 10 {
+                        Text("Wrist rotation rarely crossed threshold")
                             .font(.system(size: 8))
                             .foregroundStyle(.yellow)
+                    }
+                    if repPct > 30 {
+                        Text("Strong repetitive pattern detected")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.green)
                     }
                 }
                 .padding(6)
@@ -371,15 +401,17 @@ struct MealDetailView: View {
                         .foregroundStyle(.secondary)
 
                     ForEach(meal.entries.suffix(20)) { entry in
-                        HStack(spacing: 4) {
-                            Text(entry.timestamp.formatted(.dateTime.hour().minute().second()))
-                                .frame(width: 50, alignment: .leading)
-                            Text("P:\(String(format: "%.2f", entry.pitch))")
-                                .foregroundStyle(entry.pitch > 0.25 ? .green : .gray)
-                            Text("R:\(String(format: "%.2f", entry.rollRange))")
-                                .foregroundStyle(entry.rollRange > 0.15 ? .green : .gray)
+                        HStack(spacing: 3) {
+                            Text(entry.timestamp.formatted(.dateTime.second()))
+                                .frame(width: 18, alignment: .leading)
+                            Text("E:\(String(format: "%.1f", entry.gravityY))")
+                                .foregroundStyle(entry.gravityY > 0.25 ? .green : .gray)
+                            Text("W:\(String(format: "%.1f", entry.rotationRate))")
+                                .foregroundStyle(entry.rotationRate > 0.5 ? .green : .gray)
+                            Text("R:\(String(format: "%.1f", entry.repetitionScore))")
+                                .foregroundStyle(entry.repetitionScore > 0.3 ? .orange : .gray)
                             if entry.armRaised {
-                                Text("↑")
+                                Text("^")
                                     .foregroundStyle(.green)
                             }
                         }

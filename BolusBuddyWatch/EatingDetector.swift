@@ -6,9 +6,16 @@ import WatchKit
 #endif
 
 /// Detects eating gestures using Apple Watch accelerometer and gyroscope.
-/// Eating involves repeated arm-raise-to-mouth cycles with wrist rotation.
+///
+/// Phase 1 detection (research-backed):
+/// - gravity.y for arm elevation (more stable than Euler pitch, no gimbal lock)
+/// - rotationRate.x for wrist supination/pronation (instantaneous, no windowing needed)
+/// - userAcceleration magnitude for dynamic hand movement
+/// - Median filter smoothing (outlier-robust vs mean)
+/// - Autocorrelation of acceleration for repetitive eating pattern detection
+/// - CMMotionActivity gating: only detect when user is stationary
+///
 /// Also uses location to detect food establishments (5 min dwell = reminder).
-/// When eating is detected for ~2 minutes without a recent bolus, sends an alert.
 class EatingDetector: NSObject, ObservableObject {
     static let shared = EatingDetector()
 
@@ -25,10 +32,12 @@ class EatingDetector: NSObject, ObservableObject {
 
     // Debug mode — shows live sensor values on screen
     @Published var debugMode = false
-    @Published var debugPitch: Double = 0
-    @Published var debugRoll: Double = 0
-    @Published var debugRollRange: Double = 0
+    @Published var debugGravityY: Double = 0       // arm elevation (-1 down, +1 up)
+    @Published var debugRotationRate: Double = 0    // wrist rotation speed (rad/s)
+    @Published var debugAccelMag: Double = 0        // user acceleration magnitude
     @Published var debugArmRaised = false
+    @Published var debugRepetition: Double = 0      // autocorrelation score (0-1)
+    @Published var debugIsStationary = true         // from CMMotionActivity
 
     // Meal recording — logs sensor data for threshold tuning
     @Published var isRecordingMeal = false
@@ -40,29 +49,45 @@ class EatingDetector: NSObject, ObservableObject {
     // Bite detection
     private var biteEvents: [Date] = []
     private var isArmRaised = false
-    private var wasArmRaised = false
-    private var lastMotionUpdate = Date()
+    private var peakRotationInCycle: Double = 0     // track max wrist rotation during arm-up
 
-    // Thresholds (tunable) — lowered from original to catch real eating patterns
-    private let biteWindowSeconds: TimeInterval = 120      // 2-minute window
-    private let minimumBitesForEating = 5                   // 5 bites = eating
-    private let alertCooldownMinutes: TimeInterval = 30     // Don't re-alert for 30 min
-    private let armRaisedPitchThreshold: Double = 0.25      // ~14 degrees (was 0.45/~26°)
-    private let armLoweredPitchThreshold: Double = 0.10     // ~6 degrees (was 0.25/~14°)
-    private let minimumWristRoll: Double = 0.15             // ~9 degrees (was 0.3/~17°)
+    // Thresholds (research-backed)
+    private let biteWindowSeconds: TimeInterval = 180       // 3-minute window (was 2m — research shows 3-4m is better)
+    private let minimumBitesForEating = 3                    // 3 bites = eating (Klue uses 3)
+    private let alertCooldownMinutes: TimeInterval = 30      // Don't re-alert for 30 min
 
-    // Smoothing
-    private var pitchHistory: [Double] = []
-    private var rollHistory: [Double] = []
-    private let smoothingWindow = 5 // samples (was 10 — faster response)
+    // Gravity.y thresholds (arm elevation via gravity vector)
+    // gravity.y: -1.0 = arm pointing straight down, 0.0 = horizontal, +1.0 = straight up
+    // Negated: -gravity.y gives us elevation where positive = arm raised
+    private let armRaisedThreshold: Double = 0.25           // arm raised ~15° above horizontal
+    private let armLoweredThreshold: Double = 0.10          // arm back near horizontal
+
+    // RotationRate.x threshold (wrist supination/pronation in rad/s)
+    // Eating typically shows peaks > 0.8 rad/s during fork-to-mouth
+    private let minimumWristRotation: Double = 0.5          // rad/s peak during cycle
+
+    // Acceleration magnitude threshold (filters out static arm positions)
+    private let minimumAccelMag: Double = 0.05              // must have some dynamic motion
+
+    // Autocorrelation — detects repetitive eating pattern
+    private var accelMagHistory: [Double] = []              // rolling buffer of accel magnitudes
+    private let accelHistorySize = 150                       // 6 seconds at 25Hz
+    private let repetitionThreshold: Double = 0.3           // autocorrelation score for "repetitive"
+    private var repetitionScore: Double = 0
+
+    // Smoothing buffers (median filter, 2-3 second windows)
+    private var gravityYHistory: [Double] = []
+    private var rotationXHistory: [Double] = []
+    private let smoothingWindow = 15 // samples at 25Hz = 0.6s (median filter handles outliers)
+
+    // Activity state — only detect eating when stationary
+    private var isUserStationary = true
+    private var activityManager: CMMotionActivityManager?
 
     // Extended runtime for background
     #if os(watchOS)
     private var session: WKExtendedRuntimeSession?
     #endif
-
-    // Retain the activity manager so the permission dialog actually appears
-    private var activityManager: CMMotionActivityManager?
 
     // MARK: - Public API
 
@@ -80,20 +105,33 @@ class EatingDetector: NSObject, ObservableObject {
         }
         locationDetector.startMonitoring()
 
-        // Trigger the motion permission prompt by querying CMMotionActivityManager.
-        // CMMotionManager alone does NOT trigger the system permission dialog.
-        // Must retain activityManager as a property or the callback never fires.
+        // Start activity monitoring (stationary detection)
         activityManager = CMMotionActivityManager()
+        startActivityMonitoring()
+
+        // Trigger the motion permission prompt
         let now = Date()
         let oneHourAgo = now.addingTimeInterval(-3600)
         activityManager?.queryActivityStarting(from: oneHourAgo, to: now, to: .main) { [weak self] _, _ in
-            // Permission dialog has been shown (or was already granted).
             self?.beginMotionUpdates()
         }
     }
 
+    private func startActivityMonitoring() {
+        activityManager?.startActivityUpdates(to: .main) { [weak self] activity in
+            guard let self = self, let activity = activity else { return }
+            // User is "stationary" if not walking, running, cycling, or in a vehicle
+            let stationary = activity.stationary || (!activity.walking && !activity.running && !activity.cycling && !activity.automotive)
+            self.isUserStationary = stationary
+            if self.debugMode {
+                DispatchQueue.main.async {
+                    self.debugIsStationary = stationary
+                }
+            }
+        }
+    }
+
     private func beginMotionUpdates() {
-        // Check authorization after the prompt
         let status = CMMotionActivityManager.authorizationStatus()
         guard status == .authorized || status == .notDetermined else {
             print("BolusBuddy: Motion permission denied (status: \(status.rawValue))")
@@ -104,18 +142,19 @@ class EatingDetector: NSObject, ObservableObject {
         startExtendedSession()
         #endif
 
-        motionManager.deviceMotionUpdateInterval = 1.0 / 25.0 // 25Hz (battery-efficient)
+        motionManager.deviceMotionUpdateInterval = 1.0 / 25.0 // 25Hz
         motionManager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
             guard let self = self, let motion = motion else { return }
             self.processMotion(motion)
         }
 
         isMonitoring = true
-        print("BolusBuddy: Eating detection started")
+        print("BolusBuddy: Eating detection started (Phase 1 — gravity + rotationRate + autocorrelation)")
     }
 
     func stopMonitoring() {
         motionManager.stopDeviceMotionUpdates()
+        activityManager?.stopActivityUpdates()
         locationDetector.stopMonitoring()
         #if os(watchOS)
         session?.invalidate()
@@ -126,6 +165,10 @@ class EatingDetector: NSObject, ObservableObject {
         locationTriggered = false
         biteEvents.removeAll()
         biteCount = 0
+        accelMagHistory.removeAll()
+        gravityYHistory.removeAll()
+        rotationXHistory.removeAll()
+        repetitionScore = 0
         print("BolusBuddy: Eating detection stopped")
     }
 
@@ -139,7 +182,6 @@ class EatingDetector: NSObject, ObservableObject {
     // MARK: - Location-Based Detection
 
     private func handleFoodPlaceDwell(placeName: String) {
-        // Check cooldown — don't alert if we recently alerted
         if let lastAlert = lastAlertTime,
            Date().timeIntervalSince(lastAlert) < alertCooldownMinutes * 60 {
             return
@@ -151,12 +193,9 @@ class EatingDetector: NSObject, ObservableObject {
             self.lastAlertTime = Date()
         }
 
-        // Stop motion updates for this meal — location already triggered
         motionManager.stopDeviceMotionUpdates()
-
         sendBolusReminder(locationName: placeName)
 
-        // Resume motion detection after cooldown
         DispatchQueue.main.asyncAfter(deadline: .now() + alertCooldownMinutes * 60) { [weak self] in
             guard let self = self, self.isMonitoring else { return }
             self.locationTriggered = false
@@ -164,56 +203,136 @@ class EatingDetector: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Motion Processing
+    // MARK: - Motion Processing (Phase 1 — research-backed)
 
     private func processMotion(_ motion: CMDeviceMotion) {
-        // Skip motion detection if location already triggered for this meal
         if locationTriggered { return }
 
-        let pitch = motion.attitude.pitch
-        let roll = motion.attitude.roll
+        // --- Extract signals ---
 
-        // Add to smoothing buffers
-        pitchHistory.append(pitch)
-        rollHistory.append(roll)
-        if pitchHistory.count > smoothingWindow { pitchHistory.removeFirst() }
-        if rollHistory.count > smoothingWindow { rollHistory.removeFirst() }
+        // Arm elevation from gravity vector (more stable than Euler pitch)
+        // gravity.y is negative when arm hangs down, positive when raised
+        // We negate it so positive = arm up
+        let armElevation = -motion.gravity.y
 
-        let smoothedPitch = pitchHistory.reduce(0, +) / Double(pitchHistory.count)
-        let smoothedRoll = rollHistory.reduce(0, +) / Double(rollHistory.count)
+        // Wrist rotation speed (supination/pronation)
+        let wristRotation = abs(motion.rotationRate.x)
+
+        // User acceleration magnitude (dynamic movement, gravity removed)
+        let ax = motion.userAcceleration.x
+        let ay = motion.userAcceleration.y
+        let az = motion.userAcceleration.z
+        let accelMag = sqrt(ax*ax + ay*ay + az*az)
+
+        // --- Smoothing with median filter ---
+        gravityYHistory.append(armElevation)
+        rotationXHistory.append(wristRotation)
+        if gravityYHistory.count > smoothingWindow { gravityYHistory.removeFirst() }
+        if rotationXHistory.count > smoothingWindow { rotationXHistory.removeFirst() }
+
+        let smoothedElevation = medianFilter(gravityYHistory)
+        let smoothedRotation = medianFilter(rotationXHistory)
+
+        // --- Autocorrelation for repetitive pattern detection ---
+        accelMagHistory.append(accelMag)
+        if accelMagHistory.count > accelHistorySize { accelMagHistory.removeFirst() }
+        // Compute autocorrelation every ~1 second (every 25 samples)
+        if accelMagHistory.count >= accelHistorySize && accelMagHistory.count % 25 == 0 {
+            repetitionScore = computeAutocorrelation(accelMagHistory, lagRange: 50...75)
+            // lag 50-75 at 25Hz = 2-3 second period = typical bite interval
+        }
+
+        // --- Track peak rotation during arm-raised cycle ---
+        if isArmRaised {
+            peakRotationInCycle = max(peakRotationInCycle, smoothedRotation)
+        }
 
         // Adjusted thresholds based on sensitivity
-        let raiseThreshold = armRaisedPitchThreshold / sensitivity
-        let lowerThreshold = armLoweredPitchThreshold / sensitivity
+        let raiseThreshold = armRaisedThreshold / sensitivity
+        let lowerThreshold = armLoweredThreshold / sensitivity
+        let rotationThreshold = minimumWristRotation / sensitivity
 
-        // Update debug values and log if recording
-        let rollRangeForDebug = (rollHistory.max() ?? 0) - (rollHistory.min() ?? 0)
+        // --- Update debug values ---
         if debugMode {
             DispatchQueue.main.async {
-                self.debugPitch = smoothedPitch
-                self.debugRoll = smoothedRoll
-                self.debugRollRange = rollRangeForDebug
+                self.debugGravityY = smoothedElevation
+                self.debugRotationRate = smoothedRotation
+                self.debugAccelMag = accelMag
                 self.debugArmRaised = self.isArmRaised
+                self.debugRepetition = self.repetitionScore
             }
         }
-        logSensorData(pitch: smoothedPitch, roll: smoothedRoll, rollRange: rollRangeForDebug)
+        logSensorData(
+            gravityY: smoothedElevation,
+            rotationRate: smoothedRotation,
+            accelMag: accelMag,
+            repetitionScore: repetitionScore
+        )
 
-        // Detect arm raise-to-mouth cycle
-        // Phase 1: Arm goes up (pitch increases past threshold)
-        if smoothedPitch > raiseThreshold && !isArmRaised {
+        // --- Gate: skip detection if user is walking/driving ---
+        if !isUserStationary { return }
+
+        // --- Bite detection (two-phase cycle) ---
+
+        // Phase 1: Arm goes up
+        if smoothedElevation > raiseThreshold && !isArmRaised {
             isArmRaised = true
+            peakRotationInCycle = smoothedRotation
         }
-        // Phase 2: Arm comes back down (pitch drops below lower threshold)
-        else if smoothedPitch < lowerThreshold && isArmRaised {
+        // Phase 2: Arm comes back down — check if it was a bite
+        else if smoothedElevation < lowerThreshold && isArmRaised {
             isArmRaised = false
 
-            // Check if there was meaningful wrist rotation during this cycle
-            let rollRange = (rollHistory.max() ?? 0) - (rollHistory.min() ?? 0)
-            if rollRange > minimumWristRoll / sensitivity {
+            // A bite requires: wrist rotated during the raise AND some dynamic motion
+            let hadRotation = peakRotationInCycle > rotationThreshold
+            let hadMovement = accelMag > minimumAccelMag
+
+            if hadRotation && hadMovement {
                 recordBiteEvent()
             }
+
+            peakRotationInCycle = 0
         }
     }
+
+    // MARK: - Median Filter
+
+    private func medianFilter(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let mid = sorted.count / 2
+        if sorted.count % 2 == 0 {
+            return (sorted[mid - 1] + sorted[mid]) / 2.0
+        }
+        return sorted[mid]
+    }
+
+    // MARK: - Autocorrelation (detects repetitive eating motion)
+
+    private func computeAutocorrelation(_ signal: [Double], lagRange: ClosedRange<Int>) -> Double {
+        let n = signal.count
+        guard n > lagRange.upperBound else { return 0 }
+
+        let mean = signal.reduce(0, +) / Double(n)
+        let variance = signal.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(n)
+        guard variance > 0.0001 else { return 0 } // near-zero variance = no motion
+
+        var maxCorrelation: Double = 0
+
+        for lag in lagRange {
+            var correlation: Double = 0
+            let count = n - lag
+            for i in 0..<count {
+                correlation += (signal[i] - mean) * (signal[i + lag] - mean)
+            }
+            correlation /= Double(count) * variance
+            maxCorrelation = max(maxCorrelation, correlation)
+        }
+
+        return min(max(maxCorrelation, 0), 1) // clamp to 0-1
+    }
+
+    // MARK: - Bite Recording
 
     private func recordBiteEvent() {
         let now = Date()
@@ -227,11 +346,15 @@ class EatingDetector: NSObject, ObservableObject {
         }
 
         // Check if we've reached the eating threshold
-        if biteEvents.count >= minimumBitesForEating && !isEatingDetected {
-            // Check cooldown
+        // Bonus: if repetition score is high, we're more confident it's eating
+        let effectiveMinBites = repetitionScore > repetitionThreshold
+            ? max(minimumBitesForEating - 1, 2)  // need fewer bites if motion is clearly repetitive
+            : minimumBitesForEating
+
+        if biteEvents.count >= effectiveMinBites && !isEatingDetected {
             if let lastAlert = lastAlertTime,
                Date().timeIntervalSince(lastAlert) < alertCooldownMinutes * 60 {
-                return // Still in cooldown
+                return
             }
 
             DispatchQueue.main.async {
@@ -254,16 +377,12 @@ class EatingDetector: NSObject, ObservableObject {
 
     private func sendBolusReminder(locationName: String?) {
         #if os(watchOS)
-        // Haptic alert on watch
         WKInterfaceDevice.current().play(.notification)
-
-        // Schedule a second haptic after 2 seconds for urgency
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             WKInterfaceDevice.current().play(.retry)
         }
         #endif
 
-        // Local notification (appears on watch + mirrors to phone)
         let content = UNMutableNotificationContent()
         if let name = locationName {
             content.title = "At \(name) — bolus?"
@@ -279,9 +398,8 @@ class EatingDetector: NSObject, ObservableObject {
         let request = UNNotificationRequest(
             identifier: "bolus-reminder-\(Date().timeIntervalSince1970)",
             content: content,
-            trigger: nil // Deliver immediately
+            trigger: nil
         )
-
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
                 print("BolusBuddy: Notification error: \(error)")
@@ -290,20 +408,18 @@ class EatingDetector: NSObject, ObservableObject {
             }
         }
 
-        // Send a follow-up reminder in 5 minutes if they might have forgotten
-        let followUpContent = UNMutableNotificationContent()
-        followUpContent.title = "Bolus Reminder"
-        followUpContent.body = "Just checking - did you bolus for your meal? It's been 5 minutes."
-        followUpContent.sound = .default
-        followUpContent.interruptionLevel = .timeSensitive
+        // Follow-up in 5 minutes
+        let followUp = UNMutableNotificationContent()
+        followUp.title = "Bolus Reminder"
+        followUp.body = "Just checking - did you bolus for your meal? It's been 5 minutes."
+        followUp.sound = .default
+        followUp.interruptionLevel = .timeSensitive
 
-        let followUpTrigger = UNTimeIntervalNotificationTrigger(timeInterval: 300, repeats: false)
         let followUpRequest = UNNotificationRequest(
             identifier: "bolus-followup-\(Date().timeIntervalSince1970)",
-            content: followUpContent,
-            trigger: followUpTrigger
+            content: followUp,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 300, repeats: false)
         )
-
         UNUserNotificationCenter.current().add(followUpRequest)
     }
 
@@ -313,7 +429,6 @@ class EatingDetector: NSObject, ObservableObject {
         mealLog.removeAll()
         lastLogTime = nil
         isRecordingMeal = true
-        // Also enable debug so they can see values live
         debugMode = true
         print("BolusBuddy: Meal recording started")
     }
@@ -338,7 +453,7 @@ class EatingDetector: NSObject, ObservableObject {
         saveMealsToDisk()
     }
 
-    private func logSensorData(pitch: Double, roll: Double, rollRange: Double) {
+    private func logSensorData(gravityY: Double, rotationRate: Double, accelMag: Double, repetitionScore: Double) {
         guard isRecordingMeal else { return }
         let now = Date()
         if let last = lastLogTime, now.timeIntervalSince(last) < logInterval { return }
@@ -346,9 +461,10 @@ class EatingDetector: NSObject, ObservableObject {
 
         let entry = MealLogEntry(
             timestamp: now,
-            pitch: pitch,
-            roll: roll,
-            rollRange: rollRange,
+            gravityY: gravityY,
+            rotationRate: rotationRate,
+            accelMag: accelMag,
+            repetitionScore: repetitionScore,
             armRaised: isArmRaised,
             biteCount: biteEvents.count
         )
@@ -359,17 +475,17 @@ class EatingDetector: NSObject, ObservableObject {
 
     private func saveMealsToDisk() {
         guard let data = try? JSONEncoder().encode(savedMeals) else { return }
-        UserDefaults.standard.set(data, forKey: "savedMeals")
+        UserDefaults.standard.set(data, forKey: "savedMeals_v2")
     }
 
     func loadMealsFromDisk() {
-        guard let data = UserDefaults.standard.data(forKey: "savedMeals"),
+        guard let data = UserDefaults.standard.data(forKey: "savedMeals_v2"),
               let meals = try? JSONDecoder().decode([SavedMeal].self, from: data) else { return }
         savedMeals = meals
     }
 
     #if os(watchOS)
-    // MARK: - Extended Runtime Session (keeps app running in background)
+    // MARK: - Extended Runtime Session
 
     private func startExtendedSession() {
         session?.invalidate()
@@ -381,7 +497,6 @@ class EatingDetector: NSObject, ObservableObject {
 }
 
 #if os(watchOS)
-// MARK: - Extended Runtime Session Delegate
 extension EatingDetector: WKExtendedRuntimeSessionDelegate {
     func extendedRuntimeSessionDidStart(_ session: WKExtendedRuntimeSession) {
         print("BolusBuddy: Extended session started")
@@ -408,14 +523,15 @@ extension EatingDetector: WKExtendedRuntimeSessionDelegate {
 struct MealLogEntry: Codable, Identifiable {
     let id = UUID()
     let timestamp: Date
-    let pitch: Double
-    let roll: Double
-    let rollRange: Double
+    let gravityY: Double        // arm elevation (-gravity.y)
+    let rotationRate: Double    // wrist rotation speed (rad/s)
+    let accelMag: Double        // user acceleration magnitude
+    let repetitionScore: Double // autocorrelation (0-1)
     let armRaised: Bool
     let biteCount: Int
 
     enum CodingKeys: String, CodingKey {
-        case timestamp, pitch, roll, rollRange, armRaised, biteCount
+        case timestamp, gravityY, rotationRate, accelMag, repetitionScore, armRaised, biteCount
     }
 }
 
@@ -430,10 +546,12 @@ struct SavedMeal: Codable, Identifiable {
         return last.timestamp.timeIntervalSince(first.timestamp)
     }
 
-    var maxPitch: Double { entries.map(\.pitch).max() ?? 0 }
-    var avgPitch: Double { entries.isEmpty ? 0 : entries.map(\.pitch).reduce(0, +) / Double(entries.count) }
-    var maxRollRange: Double { entries.map(\.rollRange).max() ?? 0 }
-    var avgRollRange: Double { entries.isEmpty ? 0 : entries.map(\.rollRange).reduce(0, +) / Double(entries.count) }
+    var maxGravityY: Double { entries.map(\.gravityY).max() ?? 0 }
+    var avgGravityY: Double { entries.isEmpty ? 0 : entries.map(\.gravityY).reduce(0, +) / Double(entries.count) }
+    var maxRotationRate: Double { entries.map(\.rotationRate).max() ?? 0 }
+    var avgRotationRate: Double { entries.isEmpty ? 0 : entries.map(\.rotationRate).reduce(0, +) / Double(entries.count) }
+    var avgAccelMag: Double { entries.isEmpty ? 0 : entries.map(\.accelMag).reduce(0, +) / Double(entries.count) }
+    var avgRepetition: Double { entries.isEmpty ? 0 : entries.map(\.repetitionScore).reduce(0, +) / Double(entries.count) }
 
     enum CodingKeys: String, CodingKey {
         case date, entries, bitesCounted
