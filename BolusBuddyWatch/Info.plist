@@ -19,7 +19,7 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
     <key>WKApplication</key>
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
@@ -32,10 +32,6 @@
     <string>BolusBuddy needs background location access to detect when you arrive at a restaurant and remind you to bolus, even when the app isn't open.</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>BolusBuddy needs background location access to detect when you arrive at a restaurant and remind you to bolus, even when the app isn't open.</string>
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>location</string>
-    </array>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <key>UIDeviceFamily</key>
