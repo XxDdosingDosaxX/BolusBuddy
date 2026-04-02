@@ -12,6 +12,7 @@ class LocationDetector: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var isEnabled = true
     @Published var isAtFoodPlace = false
     @Published var currentPlaceName: String?
+    @Published var needsAlwaysPermission = false
 
     // Track how long we've been at a food place
     private var foodPlaceArrivalTime: Date?
@@ -70,9 +71,17 @@ class LocationDetector: NSObject, ObservableObject, CLLocationManagerDelegate {
     // MARK: - CLLocationManagerDelegate
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedWhenInUse ||
-           manager.authorizationStatus == .authorizedAlways {
+        let status = manager.authorizationStatus
+        if status == .authorizedWhenInUse || status == .authorizedAlways {
             manager.startUpdatingLocation()
+        }
+        // Flag if we only have "When In Use" so UI can show a warning
+        DispatchQueue.main.async {
+            self.needsAlwaysPermission = (status == .authorizedWhenInUse)
+        }
+        if status == .authorizedWhenInUse {
+            // Try to escalate — system may show "upgrade to Always" prompt
+            manager.requestAlwaysAuthorization()
         }
     }
 

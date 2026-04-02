@@ -5,6 +5,7 @@ struct WatchContentView: View {
     @AppStorage("autoStart") private var autoStart = true
 
     var body: some View {
+        NavigationStack {
         ScrollView {
             VStack(spacing: 12) {
                 // Status indicator
@@ -68,6 +69,27 @@ struct WatchContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(detector.isMonitoring ? .red : .green)
+
+                // Record Meal button
+                if detector.isMonitoring {
+                    Button(action: {
+                        if detector.isRecordingMeal {
+                            detector.stopRecordingMeal()
+                        } else {
+                            detector.startRecordingMeal()
+                        }
+                    }) {
+                        HStack {
+                            Circle()
+                                .fill(detector.isRecordingMeal ? Color.red : Color.red.opacity(0.5))
+                                .frame(width: 8, height: 8)
+                            Text(detector.isRecordingMeal ? "Stop Recording (\(detector.mealLog.count))" : "Record Meal")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(detector.isRecordingMeal ? .red : .orange)
+                }
 
                 // Dismiss alert button
                 if detector.isEatingDetected {
@@ -162,6 +184,37 @@ struct WatchContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                // Saved meals summary
+                if !detector.savedMeals.isEmpty {
+                    NavigationLink {
+                        SavedMealsView()
+                            .environmentObject(detector)
+                    } label: {
+                        HStack {
+                            Image(systemName: "list.clipboard")
+                                .font(.system(size: 10))
+                            Text("Meal Logs (\(detector.savedMeals.count))")
+                                .font(.system(size: 11))
+                        }
+                    }
+                }
+
+                // Location permission warning
+                if detector.locationDetector.needsAlwaysPermission {
+                    VStack(spacing: 4) {
+                        Text("Location: When In Use only")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.yellow)
+                        Text("Go to Settings → Privacy → Location → BolusBuddy → Always")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(6)
+                    .background(Color.yellow.opacity(0.15))
+                    .cornerRadius(6)
+                }
+
                 // Version
                 Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))")
                     .font(.system(size: 9))
@@ -170,10 +223,12 @@ struct WatchContentView: View {
             .padding(.horizontal, 4)
         }
         .onAppear {
+            detector.loadMealsFromDisk()
             if autoStart && !detector.isMonitoring {
                 detector.startMonitoring()
             }
         }
+        } // NavigationStack
     }
 
     private var statusText: String {
@@ -197,5 +252,162 @@ struct WatchContentView: View {
         } else {
             detector.startMonitoring()
         }
+    }
+}
+
+// MARK: - Saved Meals View
+
+struct SavedMealsView: View {
+    @EnvironmentObject var detector: EatingDetector
+
+    var body: some View {
+        List {
+            ForEach(Array(detector.savedMeals.enumerated().reversed()), id: \.element.id) { index, meal in
+                NavigationLink {
+                    MealDetailView(meal: meal)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(meal.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                            .font(.system(size: 11, weight: .semibold))
+                        HStack {
+                            Text("\(Int(meal.duration/60))m")
+                            Text("·")
+                            Text("\(meal.entries.count) pts")
+                            Text("·")
+                            Text("\(meal.bitesCounted) bites")
+                        }
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        detector.deleteMeal(at: index)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
+        }
+        .navigationTitle("Meal Logs")
+    }
+}
+
+// MARK: - Meal Detail View
+
+struct MealDetailView: View {
+    let meal: SavedMeal
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(meal.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                    .font(.system(size: 12, weight: .bold))
+
+                // Summary stats
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SUMMARY")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.cyan)
+
+                    HStack {
+                        StatBox(label: "Duration", value: "\(Int(meal.duration/60))m")
+                        StatBox(label: "Samples", value: "\(meal.entries.count)")
+                    }
+                    HStack {
+                        StatBox(label: "Bites", value: "\(meal.bitesCounted)")
+                        StatBox(label: "Max Pitch", value: String(format: "%.2f", meal.maxPitch))
+                    }
+                    HStack {
+                        StatBox(label: "Avg Pitch", value: String(format: "%.2f", meal.avgPitch))
+                        StatBox(label: "Avg RollΔ", value: String(format: "%.2f", meal.avgRollRange))
+                    }
+                    HStack {
+                        StatBox(label: "Max RollΔ", value: String(format: "%.2f", meal.maxRollRange))
+                        Spacer()
+                    }
+                }
+                .padding(6)
+                .background(Color.black.opacity(0.4))
+                .cornerRadius(6)
+
+                // Threshold analysis
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("THRESHOLD ANALYSIS")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.orange)
+
+                    let pitchAbove = meal.entries.filter { $0.pitch > 0.25 }.count
+                    let rollAbove = meal.entries.filter { $0.rollRange > 0.15 }.count
+                    let pitchPct = meal.entries.isEmpty ? 0 : Int(Double(pitchAbove) / Double(meal.entries.count) * 100)
+                    let rollPct = meal.entries.isEmpty ? 0 : Int(Double(rollAbove) / Double(meal.entries.count) * 100)
+
+                    Text("Pitch > 0.25: \(pitchPct)% of time")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(pitchPct > 20 ? .green : .red)
+                    Text("RollΔ > 0.15: \(rollPct)% of time")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(rollPct > 20 ? .green : .red)
+
+                    if pitchPct < 10 {
+                        Text("⚠ Pitch rarely crossed threshold — need lower pitch threshold")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.yellow)
+                    }
+                    if rollPct < 10 {
+                        Text("⚠ Roll rarely crossed threshold — need lower roll threshold")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.yellow)
+                    }
+                }
+                .padding(6)
+                .background(Color.black.opacity(0.4))
+                .cornerRadius(6)
+
+                // Raw data scroll
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("RAW DATA (last 20)")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(meal.entries.suffix(20)) { entry in
+                        HStack(spacing: 4) {
+                            Text(entry.timestamp.formatted(.dateTime.hour().minute().second()))
+                                .frame(width: 50, alignment: .leading)
+                            Text("P:\(String(format: "%.2f", entry.pitch))")
+                                .foregroundStyle(entry.pitch > 0.25 ? .green : .gray)
+                            Text("R:\(String(format: "%.2f", entry.rollRange))")
+                                .foregroundStyle(entry.rollRange > 0.15 ? .green : .gray)
+                            if entry.armRaised {
+                                Text("↑")
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        .font(.system(size: 7, design: .monospaced))
+                    }
+                }
+                .padding(6)
+                .background(Color.black.opacity(0.4))
+                .cornerRadius(6)
+            }
+            .padding(.horizontal, 4)
+        }
+        .navigationTitle("Detail")
+    }
+}
+
+struct StatBox: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+            Text(label)
+                .font(.system(size: 7))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }

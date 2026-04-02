@@ -30,6 +30,13 @@ class EatingDetector: NSObject, ObservableObject {
     @Published var debugRollRange: Double = 0
     @Published var debugArmRaised = false
 
+    // Meal recording — logs sensor data for threshold tuning
+    @Published var isRecordingMeal = false
+    @Published var mealLog: [MealLogEntry] = []
+    @Published var savedMeals: [SavedMeal] = []
+    private var lastLogTime: Date?
+    private let logInterval: TimeInterval = 0.5 // Log every 0.5s (2Hz)
+
     // Bite detection
     private var biteEvents: [Date] = []
     private var isArmRaised = false
@@ -179,16 +186,17 @@ class EatingDetector: NSObject, ObservableObject {
         let raiseThreshold = armRaisedPitchThreshold / sensitivity
         let lowerThreshold = armLoweredPitchThreshold / sensitivity
 
-        // Update debug values
+        // Update debug values and log if recording
+        let rollRangeForDebug = (rollHistory.max() ?? 0) - (rollHistory.min() ?? 0)
         if debugMode {
-            let rollRange = (rollHistory.max() ?? 0) - (rollHistory.min() ?? 0)
             DispatchQueue.main.async {
                 self.debugPitch = smoothedPitch
                 self.debugRoll = smoothedRoll
-                self.debugRollRange = rollRange
+                self.debugRollRange = rollRangeForDebug
                 self.debugArmRaised = self.isArmRaised
             }
         }
+        logSensorData(pitch: smoothedPitch, roll: smoothedRoll, rollRange: rollRangeForDebug)
 
         // Detect arm raise-to-mouth cycle
         // Phase 1: Arm goes up (pitch increases past threshold)
@@ -299,6 +307,67 @@ class EatingDetector: NSObject, ObservableObject {
         UNUserNotificationCenter.current().add(followUpRequest)
     }
 
+    // MARK: - Meal Recording
+
+    func startRecordingMeal() {
+        mealLog.removeAll()
+        lastLogTime = nil
+        isRecordingMeal = true
+        // Also enable debug so they can see values live
+        debugMode = true
+        print("BolusBuddy: Meal recording started")
+    }
+
+    func stopRecordingMeal() {
+        isRecordingMeal = false
+        if !mealLog.isEmpty {
+            let meal = SavedMeal(
+                date: Date(),
+                entries: mealLog,
+                bitesCounted: biteCount
+            )
+            savedMeals.append(meal)
+            saveMealsToDisk()
+            print("BolusBuddy: Meal recorded — \(mealLog.count) samples, \(biteCount) bites detected")
+        }
+    }
+
+    func deleteMeal(at index: Int) {
+        guard index < savedMeals.count else { return }
+        savedMeals.remove(at: index)
+        saveMealsToDisk()
+    }
+
+    private func logSensorData(pitch: Double, roll: Double, rollRange: Double) {
+        guard isRecordingMeal else { return }
+        let now = Date()
+        if let last = lastLogTime, now.timeIntervalSince(last) < logInterval { return }
+        lastLogTime = now
+
+        let entry = MealLogEntry(
+            timestamp: now,
+            pitch: pitch,
+            roll: roll,
+            rollRange: rollRange,
+            armRaised: isArmRaised,
+            biteCount: biteEvents.count
+        )
+        DispatchQueue.main.async {
+            self.mealLog.append(entry)
+        }
+    }
+
+    private func saveMealsToDisk() {
+        guard let data = try? JSONEncoder().encode(savedMeals) else { return }
+        UserDefaults.standard.set(data, forKey: "savedMeals")
+    }
+
+    func loadMealsFromDisk() {
+        guard let data = UserDefaults.standard.data(forKey: "savedMeals"),
+              let meals = try? JSONDecoder().decode([SavedMeal].self, from: data) else { return }
+        savedMeals = meals
+    }
+
     #if os(watchOS)
     // MARK: - Extended Runtime Session (keeps app running in background)
 
@@ -333,3 +402,40 @@ extension EatingDetector: WKExtendedRuntimeSessionDelegate {
     }
 }
 #endif
+
+// MARK: - Meal Log Data Models
+
+struct MealLogEntry: Codable, Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let pitch: Double
+    let roll: Double
+    let rollRange: Double
+    let armRaised: Bool
+    let biteCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp, pitch, roll, rollRange, armRaised, biteCount
+    }
+}
+
+struct SavedMeal: Codable, Identifiable {
+    let id = UUID()
+    let date: Date
+    let entries: [MealLogEntry]
+    let bitesCounted: Int
+
+    var duration: TimeInterval {
+        guard let first = entries.first, let last = entries.last else { return 0 }
+        return last.timestamp.timeIntervalSince(first.timestamp)
+    }
+
+    var maxPitch: Double { entries.map(\.pitch).max() ?? 0 }
+    var avgPitch: Double { entries.isEmpty ? 0 : entries.map(\.pitch).reduce(0, +) / Double(entries.count) }
+    var maxRollRange: Double { entries.map(\.rollRange).max() ?? 0 }
+    var avgRollRange: Double { entries.isEmpty ? 0 : entries.map(\.rollRange).reduce(0, +) / Double(entries.count) }
+
+    enum CodingKeys: String, CodingKey {
+        case date, entries, bitesCounted
+    }
+}
