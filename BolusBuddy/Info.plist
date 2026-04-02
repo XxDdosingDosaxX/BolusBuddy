@@ -19,7 +19,7 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>7</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIApplicationSceneManifest</key>
@@ -39,5 +39,9 @@
     <string>BolusBuddy uses motion sensors to detect eating gestures and remind you to bolus.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>BolusBuddy uses your location to detect when you're at a restaurant and remind you to bolus.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>BolusBuddy needs background location access to detect when you arrive at a restaurant and remind you to bolus, even when the app isn't open.</string>
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>BolusBuddy needs background location access to detect when you arrive at a restaurant and remind you to bolus, even when the app isn't open.</string>
 </dict>
 </plist>

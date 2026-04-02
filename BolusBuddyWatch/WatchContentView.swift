@@ -100,6 +100,61 @@ struct WatchContentView: View {
                 Toggle("Location alerts", isOn: $detector.locationDetector.isEnabled)
                     .font(.system(size: 11))
 
+                // Debug mode toggle
+                Toggle("Debug", isOn: $detector.debugMode)
+                    .font(.system(size: 11))
+
+                // Debug overlay — live sensor values
+                if detector.debugMode && detector.isMonitoring {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("LIVE SENSOR DATA")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.cyan)
+
+                        HStack {
+                            Text("Pitch:")
+                                .frame(width: 45, alignment: .leading)
+                            ProgressView(value: min(abs(detector.debugPitch), 1.0))
+                                .tint(abs(detector.debugPitch) > (0.25 / detector.sensitivity) ? .green : .gray)
+                            Text(String(format: "%.2f", detector.debugPitch))
+                        }
+                        .font(.system(size: 9, design: .monospaced))
+
+                        HStack {
+                            Text("Roll:")
+                                .frame(width: 45, alignment: .leading)
+                            ProgressView(value: min(abs(detector.debugRoll), 1.0))
+                                .tint(.blue)
+                            Text(String(format: "%.2f", detector.debugRoll))
+                        }
+                        .font(.system(size: 9, design: .monospaced))
+
+                        HStack {
+                            Text("RollΔ:")
+                                .frame(width: 45, alignment: .leading)
+                            ProgressView(value: min(detector.debugRollRange, 1.0))
+                                .tint(detector.debugRollRange > (0.15 / detector.sensitivity) ? .green : .gray)
+                            Text(String(format: "%.2f", detector.debugRollRange))
+                        }
+                        .font(.system(size: 9, design: .monospaced))
+
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(detector.debugArmRaised ? Color.green : Color.gray)
+                                .frame(width: 6, height: 6)
+                            Text(detector.debugArmRaised ? "ARM UP" : "arm down")
+                                .font(.system(size: 9, design: .monospaced))
+                            Spacer()
+                            Text("Bites: \(detector.biteCount)")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(6)
+                    .background(Color.black.opacity(0.6))
+                    .cornerRadius(8)
+                }
+
                 // Last alert time
                 if let lastAlert = detector.lastAlertTime {
                     Text("Last alert: \(lastAlert.formatted(.dateTime.hour().minute()))")

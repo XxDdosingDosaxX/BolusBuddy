@@ -23,24 +23,31 @@ class EatingDetector: NSObject, ObservableObject {
     @Published var sensitivity: Double = 1.0 // 0.5 = less sensitive, 1.5 = more sensitive
     @Published var locationTriggered = false  // True when location triggered the alert
 
+    // Debug mode — shows live sensor values on screen
+    @Published var debugMode = false
+    @Published var debugPitch: Double = 0
+    @Published var debugRoll: Double = 0
+    @Published var debugRollRange: Double = 0
+    @Published var debugArmRaised = false
+
     // Bite detection
     private var biteEvents: [Date] = []
     private var isArmRaised = false
     private var wasArmRaised = false
     private var lastMotionUpdate = Date()
 
-    // Thresholds (tunable)
+    // Thresholds (tunable) — lowered from original to catch real eating patterns
     private let biteWindowSeconds: TimeInterval = 120      // 2-minute window
     private let minimumBitesForEating = 5                   // 5 bites = eating
     private let alertCooldownMinutes: TimeInterval = 30     // Don't re-alert for 30 min
-    private let armRaisedPitchThreshold: Double = 0.45      // ~26 degrees (radians)
-    private let armLoweredPitchThreshold: Double = 0.25     // ~14 degrees
-    private let minimumWristRoll: Double = 0.3              // Minimum roll change for bite
+    private let armRaisedPitchThreshold: Double = 0.25      // ~14 degrees (was 0.45/~26°)
+    private let armLoweredPitchThreshold: Double = 0.10     // ~6 degrees (was 0.25/~14°)
+    private let minimumWristRoll: Double = 0.15             // ~9 degrees (was 0.3/~17°)
 
     // Smoothing
     private var pitchHistory: [Double] = []
     private var rollHistory: [Double] = []
-    private let smoothingWindow = 10 // samples
+    private let smoothingWindow = 5 // samples (was 10 — faster response)
 
     // Extended runtime for background
     #if os(watchOS)
@@ -171,6 +178,17 @@ class EatingDetector: NSObject, ObservableObject {
         // Adjusted thresholds based on sensitivity
         let raiseThreshold = armRaisedPitchThreshold / sensitivity
         let lowerThreshold = armLoweredPitchThreshold / sensitivity
+
+        // Update debug values
+        if debugMode {
+            let rollRange = (rollHistory.max() ?? 0) - (rollHistory.min() ?? 0)
+            DispatchQueue.main.async {
+                self.debugPitch = smoothedPitch
+                self.debugRoll = smoothedRoll
+                self.debugRollRange = rollRange
+                self.debugArmRaised = self.isArmRaised
+            }
+        }
 
         // Detect arm raise-to-mouth cycle
         // Phase 1: Arm goes up (pitch increases past threshold)

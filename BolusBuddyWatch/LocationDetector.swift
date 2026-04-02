@@ -36,7 +36,7 @@ class LocationDetector: NSObject, ObservableObject, CLLocationManagerDelegate {
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
-        locationManager.allowsBackgroundLocationUpdates = false
+        locationManager.allowsBackgroundLocationUpdates = true
         locationManager.distanceFilter = 30 // Only update when moved 30m
     }
 
@@ -45,7 +45,7 @@ class LocationDetector: NSObject, ObservableObject, CLLocationManagerDelegate {
 
         let status = locationManager.authorizationStatus
         if status == .notDetermined {
-            locationManager.requestWhenInUseAuthorization()
+            locationManager.requestAlwaysAuthorization()
         } else if status == .authorizedWhenInUse || status == .authorizedAlways {
             locationManager.startUpdatingLocation()
             print("BolusBuddy: Location monitoring started")
