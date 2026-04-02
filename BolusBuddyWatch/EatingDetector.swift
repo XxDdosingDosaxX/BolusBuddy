@@ -13,7 +13,7 @@ class EatingDetector: NSObject, ObservableObject {
     static let shared = EatingDetector()
 
     private let motionManager = CMMotionManager()
-    let locationDetector = LocationDetector()
+    var locationDetector = LocationDetector()
 
     // Detection state
     @Published var isMonitoring = false
